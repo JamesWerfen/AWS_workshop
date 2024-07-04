@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Upload to S3</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="main2.js"></script>
+<script>
+
+    //window.onload = function () {
+    //    submitForm(new Event('submit'));
+    //};
+
+    // Function to handle form submission
+
+    function submitGateway(event, my_file) {
+        event.preventDefault(); // Prevent form submission and page reload
+
+        // Create a Promise for the second fetch request
+        fetchExistingEndpoint(my_file)
+            .then(data => {
+                //const parsed_obj = get_parsed_obj(data);
+				const FinalJson = data;
+
+                // Create and populate the response table
+                const responseTableElement = document.getElementById('responseTable');
+                responseTableElement.innerHTML = '';
+
+                responseTableElement.appendChild(generateTable(data, []));
+                document.getElementById("responseTable").style.display = "block";
+
+            })
+            .catch(error => {
+                console.error(error);
+            });
+    }
+</script>  
+</head>
+<body>
+  <h1>Upload XLS/XLSX to S3</h1>
+  <form id="upload-form">
+    <input type="file" id="file-input" name="file" accept=".xls, .xlsx">
+    <button id="upload-btn" type="submit">Next</button>
+  </form>
+
+
+  <div id="dropdown-container" style="display: none;">
+    <h2>Select a tab:</h2>
+    <select id="sheet-select"></select>
+    <button id="submit-btn">Next</button>
+  </div>
+
+  <div id="title-row-container" style="display: none;">
+    <h2>Choose the row with the titles:</h2>
+    <div id="title-row"></div>
+    <button id="row-btn">Next</button>
+  </div>
+
+  <div id="radio-group-container"></div>
+
+  <div></div>
+  <div id="check-group-container">
+  </div>
+
+
+    <!--- Container for the entire content --->
+    <div id="content-container">
+
+
+
+        <!-- 3Dmol Viewer Container -->
+        <div id="container"></div>
+
+        <div id="table-container">
+            <div class="response-container">
+                <table id="responseTable" class="response-table" style="display: none;">
+                    <tbody id="responseBody">
+                        <!-- Data rows will be added dynamically here -->
+                    </tbody>
+                </table>
+            </div>
+
+        </div>
+        <p id="error-message" style="color: red; font-weight: bold;"></p>
+    </div>  
+
+  <script src="https://sdk.amazonaws.com/js/aws-sdk-2.1032.0.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.16.9/xlsx.full.min.js"></script>
+  <script>
+    var RadNote = 0;
+    // Handle the form submission to upload the file
+    document.getElementById('upload-form').addEventListener('submit', function(event) {
+      event.preventDefault();
+
+      var file = document.getElementById('file-input').files[0];
+
+      // Show the dropdown container after file upload
+      document.getElementById('dropdown-container').style.display = 'block';
+      populateDropdown(file);
+    });
+
+    // Function to populate the dropdown with sheet names
+    function populateDropdown(file) {
+      var reader = new FileReader();
+      reader.onload = function(event) {
+        var data = new Uint8Array(event.target.result);
+        var workbook = XLSX.read(data, { type: 'array' });
+
+        var sheetSelect = document.getElementById('sheet-select');
+        sheetSelect.innerHTML = '';
+        workbook.SheetNames.forEach(function(sheetName) {
+          var option = document.createElement('option');
+          option.text = sheetName;
+          sheetSelect.add(option);
+        });
+      };
+
+      reader.readAsArrayBuffer(file);
+    }
+
+    async function save_to_S3(pfilename, pfile, pdata) 
+    {
+   			// Initialize the AWS SDK with your IAM user's credentials
+         AWS.config.update({
+			      accessKeyId: 'YOURACCESSKEY',
+			      secretAccessKey: 'YOURSECRETACCESSKEY',
+			      region: 'us-east-1'
+			    });
+
+
+    			// Create an S3 client
+			    var s3 = new AWS.S3();
+			    
+				var params = {
+			        Bucket: 'inova-input',
+			        Key: pfilename,
+			        Body: pfile
+				      };
+            
+          // version que necesita el sleep              
+		      //s3.upload(params, function (err, pdata) {
+		      //  if (err) {
+			    //      alert('Error uploading file: '+pfilename, err);
+				  // } else {
+          //			  alert(filename +'   has been uploaded successfully:', pdata.Location);
+        	//		 }
+          //            });
+          // version para quitar el sleep:
+          try {
+            const stored = await s3.upload(params).promise()
+            console.log(stored);
+             } catch (err) {
+            console.log('Error uploading file: '+pfilename, err);
+            }   
+    }
+    
+    // Handle form submission to store the selected tab in S3
+    document.getElementById('submit-btn').addEventListener('click', function(event) {
+      var file = document.getElementById('file-input').files[0];
+      var selectedSheetName = document.getElementById('sheet-select').value;
+
+      // Display title row container
+      document.getElementById('title-row-container').style.display = 'block';
+      displayTitleRow(file, selectedSheetName);
+    });
+
+    // Function to display the title row with radio buttons
+    function displayTitleRow(file, selectedSheetName) {
+      var reader = new FileReader();
+      reader.onload = function(event) {
+        var data = new Uint8Array(event.target.result);
+        var workbook = XLSX.read(data, { type: 'array' });
+        var sheet = workbook.Sheets[selectedSheetName];
+        var firstColumn = [];
+
+        // Extract first 15 cells of the first column
+        for (var i = 0; i < 15; i++) {
+          var cell = sheet[XLSX.utils.encode_cell({ r: i, c: 0 })];
+          if (cell && cell.v) {
+            firstColumn.push(cell.v);
+          } else {
+            firstColumn.push("");
+          }
+        }
+
+        // Display radio buttons
+        var titleRowContainer = document.getElementById('title-row');
+        titleRowContainer.innerHTML = '';
+        firstColumn.forEach(function(cellValue, index) {
+          var radioBtn = document.createElement('input');
+          radioBtn.type = 'radio';
+          radioBtn.name = 'title-row';
+          radioBtn.value = index + 1; // Adding 1 to index to start from 1 instead of 0
+          titleRowContainer.appendChild(radioBtn);
+          titleRowContainer.appendChild(document.createTextNode(cellValue));
+          titleRowContainer.appendChild(document.createElement('br'));
+        });
+
+        // Display message
+	const message = document.createElement('h2'); // Use <h2> for a more prominent heading
+	message.textContent = "Now Choose the Diagnostic Column";
+	titleRowContainer.appendChild(message);
+
+      };
+
+      reader.readAsArrayBuffer(file);
+    }
+
+    // Handle ROW button click event
+    document.getElementById('row-btn').addEventListener('click', function() {
+      var selectedRow = document.querySelector('input[name="title-row"]:checked');
+      if (selectedRow) {
+        
+
+        // Extract and display the first 10 values of the selected row
+        var rowIndex = parseInt(selectedRow.value) - 1; // Subtract 1 to get the correct index
+        var file = document.getElementById('file-input').files[0];
+        var selectedSheetName = document.getElementById('sheet-select').value;
+
+        var reader = new FileReader();
+        reader.onload = function(event) {
+          var data = new Uint8Array(event.target.result);
+          var workbook = XLSX.read(data, { type: 'array' });
+          var sheet = workbook.Sheets[selectedSheetName];
+          var rowValues = [];
+
+          // Extract first 10 cells of the selected row
+          for (var i = 0; i < 10; i++) {
+            var cell = sheet[XLSX.utils.encode_cell({ r: rowIndex, c: i })];
+            if (cell && cell.v) {
+              rowValues.push(cell.v);
+            } else {
+              rowValues.push("");
+            }
+          }
+
+          // Display the values as radio buttons
+          var radioGroup = document.createElement('div');
+          var CuentaRad = 1;
+          rowValues.forEach(function(value) {
+            var radioButton = document.createElement('input');
+	
+            radioButton.type = 'radio';
+            radioButton.name = 'selected-value';
+	    radioButton.setAttribute('data-note', CuentaRad);
+	    CuentaRad = CuentaRad + 1;
+            radioButton.value = value;
+
+	    // Add event listener to each radio button
+	    radioButton.addEventListener('click', function() {
+              RadNote = radioButton.getAttribute('data-note');
+	      // alert("Selected value: " + value + "\nNote: " + RadNote);  	        
+	    });
+
+            radioGroup.appendChild(radioButton);
+            radioGroup.appendChild(document.createTextNode(value));
+            radioGroup.appendChild(document.createElement('br'));
+          });
+
+          // Add radio group to the DOM
+          document.getElementById('radio-group-container').innerHTML = '';
+          document.getElementById('radio-group-container').appendChild(radioGroup);
+          
+          // Add a button inside the radio group container
+          var button = document.createElement('button');
+          button.textContent = 'Next';
+          document.getElementById('radio-group-container').appendChild(button);
+        };
+        reader.readAsArrayBuffer(file);
+      } else {
+        alert("Please select a row first.");
+      }
+    });
+
+// Handle "Select" button click event
+document.getElementById('radio-group-container').addEventListener('click', function(event) {
+    if (event.target.tagName === 'BUTTON' && event.target.textContent === 'Next') {
+        var selectedRow = document.querySelector('input[name="title-row"]:checked');
+        if (selectedRow) {
+            var rowIndex = parseInt(selectedRow.value) - 1;
+            var file = document.getElementById('file-input').files[0];
+            var selectedSheetName = document.getElementById('sheet-select').value;
+
+            var reader = new FileReader();
+            reader.onload = function(event) {
+                var data = new Uint8Array(event.target.result);
+                var workbook = XLSX.read(data, { type: 'array' });
+                var sheet = workbook.Sheets[selectedSheetName];
+                var rowValues = [];
+
+                // Extract cells of the selected row
+                for (var i = 0; i < sheet['!ref'].split(':')[1].replace(/\D/g, ''); i++) {
+                    var cell = sheet[XLSX.utils.encode_cell({ r: rowIndex, c: i })];
+                    if (cell && cell.v) {
+                        rowValues.push(cell.v);
+                    }
+                }
+
+                // Hide the previous section
+                document.getElementById('radio-group-container').style.display = 'none';
+                document.getElementById('title-row-container').style.display = 'none';
+                document.getElementById('title-row').style.display = 'none';
+                document.getElementById('dropdown-container').style.display = 'none';
+
+                // Display the values as checkboxes
+                var checkGroup = document.createElement('div');
+
+                // Add a checkbox for select/deselect all
+                var selectAllCheckbox = document.createElement('input');
+                selectAllCheckbox.type = 'checkbox';
+                selectAllCheckbox.id = 'select-all-checkbox';
+                selectAllCheckbox.addEventListener('change', function() {
+                    var checkboxes = document.querySelectorAll('input[name="selected-values"]');
+                    checkboxes.forEach(function(checkbox) {
+                        checkbox.checked = selectAllCheckbox.checked;
+                    });
+                });
+
+                const message2 = document.createElement('h2');
+                message2.textContent = "Select Columns to include:";
+                checkGroup.appendChild(message2);
+
+                var selectAllLabel = document.createElement('label');
+                selectAllLabel.textContent = 'Select/Deselect All';
+                selectAllLabel.style.fontWeight = 'bold';
+                selectAllLabel.style.textDecoration = 'underline';
+                selectAllLabel.setAttribute('for', 'select-all-checkbox');
+                checkGroup.appendChild(selectAllCheckbox);
+                checkGroup.appendChild(selectAllLabel);
+                checkGroup.appendChild(document.createElement('br'));
+		
+
+                // Add checkboxes for individual cells
+		var CuentaCheck = 0;
+                rowValues.forEach(function(value) {
+                    var checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.name = 'selected-values';
+	    	    CuentaCheck = CuentaCheck + 1
+              	    checkbox.setAttribute('data-note', CuentaCheck);
+
+                    checkGroup.appendChild(checkbox);
+                    checkGroup.appendChild(document.createTextNode(value));
+                    checkGroup.appendChild(document.createElement('br'));
+                });
+
+                // Add check group to the DOM
+                document.getElementById('check-group-container').innerHTML = '';
+                document.getElementById('check-group-container').appendChild(checkGroup);
+
+                // Add a button
+                var button_chk = document.createElement('button');
+                button_chk.textContent = 'UPLOAD FILE AND PROCESS';
+
+                // Add event listener to the button
+                button_chk.addEventListener('click', function() {
+                    var selectedCheckboxes = document.querySelectorAll('input[name="selected-values"]:checked');
+                    var selectedValues = [];
+                    selectedCheckboxes.forEach(function(checkbox) {
+                    	//version Strings
+			    //selectedValues.push(checkbox.value);
+			//version Numbers
+			    CheckNote = checkbox.getAttribute('data-note');
+			    selectedValues.push(CheckNote);
+
+                    });
+		// Check if all checkboxes have been selected
+    		var allCheckboxes = document.querySelectorAll('input[name="selected-values"]');
+    		if (selectedCheckboxes.length === allCheckboxes.length) {
+        		var filename = selectedSheetName+'___'+RadNote+'_all'+'.xlsx'
+    		}
+		else {
+        		var filename = selectedSheetName+'___'+RadNote+'_'+selectedValues.join('.')+'.xlsx'
+                     }
+        
+    save_to_S3(filename, file, data);
+
+
+		// end button - start gateway -
+		submitGateway(new Event('submit'), filename);
+		// end gateway
+
+	});
+
+             document.getElementById('check-group-container').appendChild(button_chk);
+      };
+
+      reader.readAsArrayBuffer(file);
+    } else {
+      alert("Please select a row first.");
+    }
+  }
+});
+
+
+  </script>
+</body>
+</html>
+
+
